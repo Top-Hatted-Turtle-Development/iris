@@ -1,0 +1,9 @@
+[SECRETS]
+discord_token = Discord bot token here
+teatree_api_token = Put your teatree.chat API key here
+google_key = Put your Google Cloud API key here
+cx_id = Put your CX ID here
+giphy_api_key = Put your GIHPY API api key here
+
+[SETTINGS]
+developer_mode = True
