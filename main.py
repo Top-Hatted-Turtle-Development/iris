@@ -24,8 +24,8 @@ the_model = "gpt-4o"
 
 CONFIG_FILE = 'config.ini'
 CHANNEL_ID = 1340580647483346975
-API_URL = 'https://teatree.chat/api/chat/completions'
-START_MSG = "You are Iris. You are an AI discord bot. You can chat with all members. You are made by Top Hatted Turtle Development, and you use Tea Tree (website: https://teatree.chat, discord: https://discord.gg/2N2HFMeVup)'s API to function. You are in multiple servers, however your memory does not transfer between them. User's messages will be in a format of (server name) username: message. Do not send messages this way. You only recieve them that way. If you want to search something on google, type ~search[query] AND NOTHING ELSE. The system will reply and you can respond to the original message with the information you found."
+API_URL = 'https://chat.teatree.chat/api/chat/completions'
+START_MSG = "You are Iris. You are an AI discord bot. You can chat with all members. You are made by Top Hatted Turtle Development, and you use Tea Tree (website: https://teatree.chat, discord: https://discord.gg/2N2HFMeVup)'s API to function. You are in multiple servers, however your memory does not transfer between them. User's messages will be in a format of (server name) username: message. Do not send messages this way. You only recieve them that way. If you want to search something on google, type ~search[query] AND NOTHING ELSE. The system will reply and you can respond to the original message with the information you found. You can also use ~gif[query] to use gifs. That will be automatically replaced by the image. You can use other text with it, like this: 'Hi, here's a funny gif ~gif[funny dog]'"
 
 # config shit
 config = configparser.ConfigParser()
@@ -37,6 +37,7 @@ BOT_ACTIVITY = config.get('SETTINGS', 'activity')
 DEV_MODE = config.getboolean('SETTINGS', 'developer_mode')
 GOOGLE_KEY = config.get('SECRETS', 'google_key')
 CX_ID = config.get('SECRETS','cx_id')
+GIPHY_KEY = config.get('SECRETS', 'giphy_api_key')
 
 # Ensure the server directory and its subdirectories exist
 if not os.path.exists('server'):
@@ -92,6 +93,22 @@ def load_models():
             return json.load(f)
     return None
 
+def get_gif_link(query):
+    log_info(f"Searching Giphy for: {query}")
+    api_key = GIPHY_KEY
+    endpoint = "https://api.giphy.com/v1/gifs/search"
+    params = {"api_key": api_key,"q": query,"limit": 1,"offset": 0,"lang": "en"}   
+    response = requests.get(endpoint, params=params)
+    if response.status_code == 200:
+        data = response.json()
+        if data['data']:
+            gif_url = data['data'][0]['images']['original']['url']
+            return gif_url
+        else:
+            return "No results found."
+    else:
+        return f"Error: {response.status_code}"
+    
 def save_models(models):
     log_info("Saving models")
     models_file = 'server/models.json'
@@ -113,6 +130,14 @@ def save_default_channels():
                 json.dump(info, f, indent=4)
         else:
             log_warning(f"Info file for guild {guild_id} does not exist")
+
+def replace_gif_tags(input_string):
+    pattern = r'~gif\[(.+?)\]'
+    def replace_function(match):
+        keyword = match.group(1)
+        gif_link = get_gif_link(keyword)
+        return gif_link
+    return re.sub(pattern, replace_function, input_string)
 
 def save_info():
     log_info("Saving info data")
@@ -158,6 +183,7 @@ async def get_user_presence(username, guild_id):
     return None
 
 async def google_search(query):
+    log_info(f"Searching Google for: {query}")
     search_url = f"https://www.googleapis.com/customsearch/v1?q={urllib.parse.quote(query)}&key={GOOGLE_KEY}&cx={CX_ID}"
     async with aiohttp.ClientSession() as session:
         async with session.get(search_url) as response:
@@ -169,7 +195,7 @@ async def chat_with_model(query, guild_id):
         for guild in bot.guilds:
             await chat_with_model(query, guild.id)
         return
-    url = 'https://teatree.chat/api/chat/completions'
+    url = 'https://chat.teatree.chat/api/chat/completions'
     headers = {
         'Authorization': f'Bearer {TEATREE_API_TOKEN}',
         'Content-Type': 'application/json'
@@ -186,6 +212,9 @@ async def chat_with_model(query, guild_id):
             async with session.post(url, headers=headers, json=payload) as response:
                 response_data = await response.json()
                 model_response = response_data['choices'][0]['message']['content']
+                model_response = replace_gif_tags(model_response)
+                guild_thing = bot.get_guild(guild_id)
+                print(f'\033[90m({guild_thing}) \033[35mIris:\033[0m {model_response}')
                 model_response = model_response.replace("@everyone", "*@*everyone").replace("@here", "*@*here")
                 
                 if "~search[" in model_response:
@@ -296,14 +325,21 @@ async def on_message(message):
                         if response == "None":
                             response = "***An error occurred. Please try again, or contact turtledevv.***"
                         else:
-                            await message.reply(response)
+                            await send_message_in_chunks(message, response)
                     else:
                         await message.reply("***An error occurred. Please try again, or contact turtledevv.***")
                 else:
-                    await message.reply(response)
-                print(f'\033[90m({message.guild.name}) \033[35mIris:\033[0m {response}')
+                    await send_message_in_chunks(message, response)
         else:
             await bot.process_commands(message)
+
+
+async def send_message_in_chunks(message, text):
+    # Split the message into chunks of max 2000 characters
+    chunk_size = 2000
+    chunks = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
+    for chunk in chunks:
+        await message.reply(chunk)
 
 def get_model_choices(obj):
     if isinstance(obj, dict) and 'data' in obj:
@@ -318,7 +354,7 @@ if models is None:
     headers = {
         "Authorization": f"Bearer {TEATREE_API_TOKEN}"
     }
-    response = requests.get("https://teatree.chat/api/models", headers=headers)
+    response = requests.get("https://chat.teatree.chat/api/models", headers=headers)
     models = response.json()
     save_models(models)
 
