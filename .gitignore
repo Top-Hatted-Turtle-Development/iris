@@ -1,0 +1,11 @@
+.local/
+.cache/
+.vscode/
+packages/
+.env
+__pycache__/
+iris.code-workspace
+
+# don't let ppl's data/chats go weee
+server/
+# note to self: update to database later
