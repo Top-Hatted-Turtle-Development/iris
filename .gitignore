@@ -5,6 +5,7 @@ packages/
 .env
 __pycache__/
 iris.code-workspace
+venv/
 
 # don't let ppl's data/chats go weee
 server/

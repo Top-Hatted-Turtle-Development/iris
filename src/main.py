@@ -30,7 +30,7 @@ CX_ID = os.getenv('CX_ID')
 GIPHY_KEY = os.getenv('GIPHY_KEY')
 DEV_MODE = config.getboolean('SETTINGS', 'developer_mode')
 
-logger.setup(os.path.splitext(os.path.basename(__file__))[0], DEV_MODE)
+# logger.setup(os.path.splitext(os.path.basename(__file__))[0], DEV_MODE)
 
 # Ensure the server directory and its subdirectories exist
 if not os.path.exists('server'):

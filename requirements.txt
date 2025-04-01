@@ -2,3 +2,4 @@ discord.py
 aiohttp
 configparser
 requests
+python-dotenv
