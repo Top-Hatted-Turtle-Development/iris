@@ -11,11 +11,12 @@ import re
 import urllib.parse
 import json
 import utils.logger as logger
+from openai import OpenAI
 
 the_model = "gpt-4o"
 
 CONFIG_FILE = 'config.ini'
-API_URL = 'https://chat.teatree.chat/api/chat/completions'
+API_URL = 'https://api.teatree.chat/v1'
 START_MSG = "You are Iris. You are an AI discord bot. You can chat with all members. You are made by Top Hatted Turtle Development, and you use Tea Tree (website: https://teatree.chat, discord: https://discord.gg/2N2HFMeVup)'s API to function. You are in multiple servers, however your memory does not transfer between them. User's messages will be in a format of (server name) username: message. Do not send messages this way. You only recieve them that way. If you want to search something on google, type ~search[query] AND NOTHING ELSE. The system will reply and you can respond to the original message with the information you found. You can also use ~gif[query] to use gifs. That will be automatically replaced by the image. You can use other text with it, like this: 'Hi, here's a funny gif ~gif[funny dog]'"
 
 # load env and config
@@ -39,6 +40,11 @@ if not os.path.exists('server/convo'):
     os.makedirs('server/convo')
 if not os.path.exists('server/info'):
     os.makedirs('server/info')
+
+client = OpenAI(
+    api_key="your-api-key",
+    base_url=API_URL
+)
 
 def load_conversation_histories():
     logger.info("Loading conversation histories")
@@ -80,11 +86,8 @@ def load_default_channels():
 
 def load_models():
     logger.info("Loading models")
-    models_file = 'server/models.json'
-    if os.path.exists(models_file):
-        with open(models_file, 'r') as f:
-            return json.load(f)
-    return None
+    models = client.models.list()
+    return models
 
 def get_gif_link(query):
     logger.info(f"Searching Giphy for: {query}")
@@ -193,59 +196,43 @@ async def chat_with_model(query, guild_id):
     if guild_id not in conversation_histories:
         conversation_histories[guild_id] = [{'role': 'user', 'content': START_MSG}]
     conversation_histories[guild_id].append({'role': 'user', 'content': query})
-    payload = {
-        'model': the_model,
-        'messages': conversation_histories[guild_id]
-    }
     try:
-        async with aiohttp.ClientSession() as session:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=conversation_histories[guild_id]
+            max_tokens=1200,
+            temperature=0.7
+        )
+        model_response = response.choices[0].message.content
+        model_response = replace_gif_tags(model_response)
+        guild_thing = bot.get_guild(guild_id)
+        print(f'\033[90m({guild_thing}) \033[35mIris:\033[0m {model_response}')
+        model_response = model_response.replace("@everyone", "*@*everyone").replace("@here", "*@*here")
+        
+        if "~search[" in model_response:
+            start_idx = model_response.find("~search[") + len("~search[")
+            end_idx = model_response.find("]", start_idx)
+            search_query = model_response[start_idx:end_idx].strip()
+            model_response = model_response[:start_idx - len("~search[")] + model_response[end_idx + 1:]
+            model_response = model_response.strip()
+            
+            search_results = await google_search(search_query)
+            if 'items' in search_results:
+                search_response = "\n".join([f"{item['title']}: {item['link']}" for item in search_results['items'][:3]])
+            else:
+                search_response = "No results found."
+            
+            # Send the search results back to the AI model for further processing
+            conversation_histories[guild_id].append({'role': 'system', 'content': f"Search Results:\n{search_response}"})
+            payload = {
+                'model': the_model,
+                'messages': conversation_histories[guild_id]
+            }
             async with session.post(url, headers=headers, json=payload) as response:
                 response_data = await response.json()
                 model_response = response_data['choices'][0]['message']['content']
-                model_response = replace_gif_tags(model_response)
-                guild_thing = bot.get_guild(guild_id)
-                print(f'\033[90m({guild_thing}) \033[35mIris:\033[0m {model_response}')
                 model_response = model_response.replace("@everyone", "*@*everyone").replace("@here", "*@*here")
-                
-                if "~search[" in model_response:
-                    start_idx = model_response.find("~search[") + len("~search[")
-                    end_idx = model_response.find("]", start_idx)
-                    search_query = model_response[start_idx:end_idx].strip()
-                    model_response = model_response[:start_idx - len("~search[")] + model_response[end_idx + 1:]
-                    model_response = model_response.strip()
-                    
-                    search_results = await google_search(search_query)
-                    if 'items' in search_results:
-                        search_response = "\n".join([f"{item['title']}: {item['link']}" for item in search_results['items'][:3]])
-                    else:
-                        search_response = "No results found."
-                    
-                    # Send the search results back to the AI model for further processing
-                    conversation_histories[guild_id].append({'role': 'system', 'content': f"Search Results:\n{search_response}"})
-                    payload = {
-                        'model': the_model,
-                        'messages': conversation_histories[guild_id]
-                    }
-                    async with session.post(url, headers=headers, json=payload) as response:
-                        response_data = await response.json()
-                        model_response = response_data['choices'][0]['message']['content']
-                        model_response = model_response.replace("@everyone", "*@*everyone").replace("@here", "*@*here")
-                        # This is fucking terrible coding practice. PLEASE, PLEASE, for the love of god and anything that is holy, replace this in a future update.
-                        if "<think>" in model_response and "</think>" in model_response:
-                            start_idx = model_response.find("<think>") + len("<think>")
-                            end_idx = model_response.find("</think>")
-                            think_content = model_response[start_idx:end_idx].strip()
-                            
-                            encoded_text = urllib.parse.quote(think_content)
-                            think_link = f"https://web-iris.vercel.app/view_thinking.html?text={encoded_text}"
-                            
-                            # Remove <think>...</think> from the message
-                            model_response = model_response[:start_idx - len("<think>")] + model_response[end_idx + len("</think>"):]
-                            model_response = model_response.strip()
-                            
-                            # Append the View Thinking link at the top
-                            model_response = f"-# *[View Thinking]({think_link})*\n{model_response}"
-                    
+                # This is fucking terrible coding practice. PLEASE, PLEASE, for the love of god and anything that is holy, replace this in a future update.
                 if "<think>" in model_response and "</think>" in model_response:
                     start_idx = model_response.find("<think>") + len("<think>")
                     end_idx = model_response.find("</think>")
@@ -260,9 +247,24 @@ async def chat_with_model(query, guild_id):
                     
                     # Append the View Thinking link at the top
                     model_response = f"-# *[View Thinking]({think_link})*\n{model_response}"
-                
-                conversation_histories[guild_id].append({'role': 'assistant', 'content': model_response})
-                return model_response
+            
+        if "<think>" in model_response and "</think>" in model_response:
+            start_idx = model_response.find("<think>") + len("<think>")
+            end_idx = model_response.find("</think>")
+            think_content = model_response[start_idx:end_idx].strip()
+            
+            encoded_text = urllib.parse.quote(think_content)
+            think_link = f"https://web-iris.vercel.app/view_thinking.html?text={encoded_text}"
+            
+            # Remove <think>...</think> from the message
+            model_response = model_response[:start_idx - len("<think>")] + model_response[end_idx + len("</think>"):]
+            model_response = model_response.strip()
+            
+            # Append the View Thinking link at the top
+            model_response = f"-# *[View Thinking]({think_link})*\n{model_response}"
+        
+        conversation_histories[guild_id].append({'role': 'assistant', 'content': model_response})
+        return model_response
     except Exception as e:
         logger.error(f"Error: {str(e)} (Using model: {the_model})")
         return None
@@ -331,24 +333,10 @@ async def send_message_in_chunks(message, text):
     for chunk in chunks:
         await message.reply(chunk)
 
-def get_model_choices(obj):
-    if isinstance(obj, dict) and 'data' in obj:
-        return [
-            discord.app_commands.Choice(name=item['id'], value=item['id']) 
-            for item in obj['data']
-        ]
-    return []
-
 models = load_models()
-if models is None:
-    headers = {
-        "Authorization": f"Bearer {TEATREE_API_TOKEN}"
-    }
-    response = requests.get("https://chat.teatree.chat/api/models", headers=headers)
-    models = response.json()
-    save_models(models)
-
-MODEL_CHOICES = get_model_choices(models)
+MODEL_CHOICES = []
+for model in models.data:
+    MODEL_CHOICES.append(discord.app_commands.Choice(name=f"{model.id} - {model.owned_by.capitalize()}", value=model.id))
 
 @bot.tree.command(name="model", description="Change the model to use.")
 @app_commands.describe(model = "The model to use.")
