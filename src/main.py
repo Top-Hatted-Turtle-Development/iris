@@ -198,8 +198,8 @@ async def chat_with_model(query, guild_id):
     conversation_histories[guild_id].append({'role': 'user', 'content': query})
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=conversation_histories[guild_id]
+            model=the_model,
+            messages=conversation_histories[guild_id],
             max_tokens=1200,
             temperature=0.7
         )
