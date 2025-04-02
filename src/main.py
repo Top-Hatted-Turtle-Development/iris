@@ -1,3 +1,6 @@
+# Iris 1.1.0-alpha
+# developed by turtledevv
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -12,7 +15,6 @@ import logging
 from openai import OpenAI
 from setup import *
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -22,18 +24,19 @@ logging.basicConfig(
     ]
 )
 
-
 client = OpenAI(
     api_key="your-api-key",
     base_url=API_URL
 )
 
-def load_models():
+
+
+def load_models() -> list:
     logging.info("Loading models")
     models = client.models.list()
     return models
 
-def get_gif_link(query):
+def get_gif_link(query: str) -> str:
     logging.info(f"Searching Giphy for: {query}")
     api_key = GIPHY_KEY
     endpoint = "https://api.giphy.com/v1/gifs/search"
@@ -52,13 +55,12 @@ def get_gif_link(query):
 def has_admin_permissions(interaction):
     return interaction.user.guild_permissions.administrator or (interaction.user.name == "turtledevv" and DEV_MODE)
 
-def replace_gif_tags(input_string):
-    pattern = r'~gif\[(.+?)\]'
+def replace_gif_tags(input_string: str) -> str:
     def replace_function(match):
         keyword = match.group(1)
-        gif_link = get_gif_link(keyword)
+        gif_link = asyncio.run(get_gif_link(keyword))
         return gif_link
-    return re.sub(pattern, replace_function, input_string)
+    return GIF_TAG_PATTERN.sub(replace_function, input_string)
 
 def save_info():
     logging.info("Saving info data")
@@ -79,17 +81,20 @@ def save_info():
             with open(info_file, 'w') as f:
                 json.dump(info, f, indent=4)
 
-# Load conversation histories and default channels before starting the bot
-conversation_histories = load_conversation_histories()
-default_channels = load_default_channels()
-anonymous_users = {}
+def extract_and_remove_think_tags(model_response):
+    if "<think>" in model_response and "</think>" in model_response:
+        start_idx = model_response.find("<think>") + len("<think>")
+        end_idx = model_response.find("</think>")
+        think_content = model_response[start_idx:end_idx].strip()
+        cleaned_response = model_response[:start_idx - len("<think>")] + model_response[end_idx + len("</think>"):]
+        cleaned_response = cleaned_response.strip()
+        return think_content, cleaned_response
+    return None, model_response
 
-# set up the bot
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="/", intents=intents)
 
 async def get_user_presence(username, guild_id):
-    # Get guild from guild ID
     guild = bot.get_guild(guild_id)
     logging.info(f"Grabbing presence for {username} in guild {guild.name}")
     if guild:
@@ -148,41 +153,24 @@ async def chat_with_model(query, guild_id):
             else:
                 search_response = "No results found."
             
-            # Send the search results back to the AI model for further processing
             conversation_histories[guild_id].append({'role': 'system', 'content': f"Search Results:\n{search_response}"})
             response = client.chat.completions.create(
                 model=the_model,
                 messages=conversation_histories[guild_id],
                 max_tokens=1200,
                 temperature=0.7
-        	)
+            )
             model_response = response.choices[0].message.content
             model_response = model_response.replace("@everyone", "*@*everyone").replace("@here", "*@*here")
-            # This is fucking terrible coding practice. PLEASE, PLEASE, for the love of god and anything that is holy, replace this in a future update.
-            if "<think>" in model_response and "</think>" in model_response:
-                start_idx = model_response.find("<think>") + len("<think>")
-                end_idx = model_response.find("</think>")
-                think_content = model_response[start_idx:end_idx].strip()
-
+            think_content, model_response = extract_and_remove_think_tags(model_response)
+            if think_content:
                 encoded_text = urllib.parse.quote(think_content)
                 think_link = f"https://web-iris.vercel.app/v.html?text={encoded_text}"
-
-                # Remove <think>...</think> from the message
-                model_response = model_response[:start_idx - len("<think>")] + model_response[end_idx + len("</think>"):]
-                model_response = model_response.strip()
             
-        if "<think>" in model_response and "</think>" in model_response:
-            start_idx = model_response.find("<think>") + len("<think>")
-            end_idx = model_response.find("</think>")
-            think_content = model_response[start_idx:end_idx].strip()
-            
+        think_content, model_response = extract_and_remove_think_tags(model_response)
+        if think_content:
             encoded_text = urllib.parse.quote(think_content)
             think_link = f"https://web-iris.vercel.app/v.html?text={encoded_text}"
-            
-            # Remove <think>...</think> from the message
-            model_response = model_response[:start_idx - len("<think>")] + model_response[end_idx + len("</think>"):]
-            model_response = model_response.strip()
-          
         
         conversation_histories[guild_id].append({'role': 'assistant', 'content': model_response})
         return model_response, think_link
@@ -213,9 +201,8 @@ async def on_ready():
 @bot.event
 async def on_message(message):
     if not message.author.bot:
-        guild_id = str(message.guild.id)  # Convert guild_id to string
+        guild_id = str(message.guild.id)
         
-        # Reload conversation histories if guild_id is not found
         if guild_id not in conversation_histories:
             conversation_histories[guild_id] = [{'role': 'user', 'content': START_MSG}]
             save_conversation_histories()
@@ -252,12 +239,11 @@ async def on_message(message):
                         await message.reply("***An error occurred. Please try again, or contact turtledevv.***")
                 else:
                     if think_link != "":
-                    	await message.reply(view=view)
+                        await message.reply(view=view)
 
                     await send_message_in_chunks(message.channel, response) # type: ignore
         else:
             await bot.process_commands(message)
-
 
 async def send_message_in_chunks(channel, text):
     chunk_size = 2000
@@ -365,7 +351,6 @@ async def change_prompt(interaction: discord.Interaction, prompt: str):
     else:
         await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
 
-
 @bot.tree.command(name="add_default_channel", description="Add a default channel for the bot to respond in.")
 async def add_default_channel(interaction: discord.Interaction):
     logging.debug(f"/add_default_channel invoked by {interaction.user.name}")
@@ -399,13 +384,13 @@ async def remove_default_channel(interaction: discord.Interaction):
         await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
 
 def bye():
-    print("Goodbye!")
+    logging.info("Shutting down bot...")
+    save_conversation_histories()
+    save_default_channels()
+    save_info()
+    logging.info("Goodbye!")
 
-# Save conversation histories on exit
 import atexit
-atexit.register(save_conversation_histories)
-atexit.register(save_default_channels)
-atexit.register(save_info)
 atexit.register(bye)
 
 bot.run(DISCORD_TOKEN)
