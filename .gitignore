@@ -6,6 +6,7 @@ packages/
 __pycache__/
 iris.code-workspace
 venv/
+bot.log
 
 # don't let ppl's data/chats go weee
 server/
