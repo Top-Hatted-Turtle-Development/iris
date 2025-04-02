@@ -87,6 +87,8 @@ def extract_and_remove_think_tags(model_response):
         end_idx = model_response.find("</think>")
         think_content = model_response[start_idx:end_idx].strip()
         cleaned_response = model_response[:start_idx - len("<think>")] + model_response[end_idx + len("</think>"):]
+        if len(think_content) >= 512:
+            think_content = "I'm super sorry, but the AI is thinking a bit.. too much? Which throws some errors with discord because the thinking URL is too long. I am trying to fix this bug by finding a workaround! SORRY! - turtledevv"
         cleaned_response = cleaned_response.strip()
         return think_content, cleaned_response
     return None, model_response
