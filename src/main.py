@@ -1,96 +1,40 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-from dotenv import load_dotenv
 import aiohttp
-import configparser
 import os
 import asyncio
 import requests
 import re
 import urllib.parse
 import json
-import utils.logger as logger
+import logging
 from openai import OpenAI
+from setup import *
 
-the_model = "gpt-4o"
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler("bot.log", encoding="utf-8")
+    ]
+)
 
-CONFIG_FILE = 'config.ini'
-API_URL = 'https://api.teatree.chat/v1'
-START_MSG = "You are Iris. You are an AI discord bot. You can chat with all members. You are made by Top Hatted Turtle Development, and you use Tea Tree (website: https://teatree.chat, discord: https://discord.gg/2N2HFMeVup)'s API to function. You are in multiple servers, however your memory does not transfer between them. User's messages will be in a format of (server name) username: message. Do not send messages this way. You only recieve them that way. If you want to search something on google, type ~search[query] AND NOTHING ELSE. The system will reply and you can respond to the original message with the information you found. You can also use ~gif[query] to use gifs. That will be automatically replaced by the image. You can use other text with it, like this: 'Hi, here's a funny gif ~gif[funny dog]'"
-
-# load env and config
-config = configparser.ConfigParser()
-config.read(CONFIG_FILE)
-load_dotenv()
-
-DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
-TEATREE_API_TOKEN = os.getenv('TEATREE_API_TOKEN')
-GOOGLE_KEY = os.getenv('GOOGLE_KEY')
-CX_ID = os.getenv('CX_ID')
-GIPHY_KEY = os.getenv('GIPHY_KEY')
-DEV_MODE = config.getboolean('SETTINGS', 'developer_mode')
-
-# logger.setup(os.path.splitext(os.path.basename(__file__))[0], DEV_MODE)
-
-# Ensure the server directory and its subdirectories exist
-if not os.path.exists('server'):
-    os.makedirs('server')
-if not os.path.exists('server/convo'):
-    os.makedirs('server/convo')
-if not os.path.exists('server/info'):
-    os.makedirs('server/info')
 
 client = OpenAI(
     api_key="your-api-key",
     base_url=API_URL
 )
 
-def load_conversation_histories():
-    logger.info("Loading conversation histories")
-    conversation_histories = {}
-    for filename in os.listdir('server/convo'):
-        if filename.endswith('.json'):
-            guild_id = filename[:-5]
-            try:
-                with open(f'server/convo/{filename}', 'r') as f:
-                    content = f.read()
-                    if not content.strip():
-                        logger.warn(f"Conversation history file for guild {guild_id} is empty")
-                        conversation_histories[guild_id] = []
-                    else:
-                        conversation_histories[guild_id] = json.loads(content)
-            except (FileNotFoundError, json.JSONDecodeError):
-                logger.error(f"Error loading conversation history for guild {guild_id}")
-                conversation_histories[guild_id] = []
-    return conversation_histories
-
-def save_conversation_histories():
-    logger.info("Saving conversation histories")
-    for guild_id, history in conversation_histories.items():
-        with open(f'server/convo/{guild_id}.json', 'w') as f:
-            json.dump(history, f, indent=4)
-
-def load_default_channels():
-    logger.info("Loading default channels")
-    default_channels = {}
-    for filename in os.listdir('server/info'):
-        if filename.endswith('.json'):
-            try:
-                with open(f'server/info/{filename}', 'r') as f:
-                    info = json.load(f)
-                    default_channels[info['server_id']] = info['default_channels']
-            except (FileNotFoundError, json.JSONDecodeError):
-                logger.error(f"Error loading default channels for {filename}")
-    return default_channels
-
 def load_models():
-    logger.info("Loading models")
+    logging.info("Loading models")
     models = client.models.list()
     return models
 
 def get_gif_link(query):
-    logger.info(f"Searching Giphy for: {query}")
+    logging.info(f"Searching Giphy for: {query}")
     api_key = GIPHY_KEY
     endpoint = "https://api.giphy.com/v1/gifs/search"
     params = {"api_key": api_key,"q": query,"limit": 1,"offset": 0,"lang": "en"}   
@@ -105,27 +49,8 @@ def get_gif_link(query):
     else:
         return f"Error: {response.status_code}"
     
-def save_models(models):
-    logger.info("Saving models")
-    models_file = 'server/models.json'
-    with open(models_file, 'w') as f:
-        json.dump(models, f, indent=4)
-
 def has_admin_permissions(interaction):
     return interaction.user.guild_permissions.administrator or (interaction.user.name == "turtledevv" and DEV_MODE)
-
-def save_default_channels():
-    logger.info("Saving default channels")
-    for guild_id, channels in default_channels.items():
-        info_file = f'server/info/{guild_id}.json'
-        if os.path.exists(info_file):
-            with open(info_file, 'r') as f:
-                info = json.load(f)
-            info['default_channels'] = channels
-            with open(info_file, 'w') as f:
-                json.dump(info, f, indent=4)
-        else:
-            logger.warn(f"Info file for guild {guild_id} does not exist")
 
 def replace_gif_tags(input_string):
     pattern = r'~gif\[(.+?)\]'
@@ -136,7 +61,7 @@ def replace_gif_tags(input_string):
     return re.sub(pattern, replace_function, input_string)
 
 def save_info():
-    logger.info("Saving info data")
+    logging.info("Saving info data")
     for guild_id, channels in default_channels.items():
         info_file = f'server/info/{guild_id}.json'
         if os.path.exists(info_file):
@@ -166,7 +91,7 @@ bot = commands.Bot(command_prefix="/", intents=intents)
 async def get_user_presence(username, guild_id):
     # Get guild from guild ID
     guild = bot.get_guild(guild_id)
-    logger.info(f"Grabbing presence for {username} in guild {guild.name}")
+    logging.info(f"Grabbing presence for {username} in guild {guild.name}")
     if guild:
         member = guild.get_member_named(username)
         if member:
@@ -176,7 +101,7 @@ async def get_user_presence(username, guild_id):
     return None
 
 async def google_search(query):
-    logger.info(f"Searching Google for: {query}")
+    logging.info(f"Searching Google for: {query}")
     search_url = f"https://www.googleapis.com/customsearch/v1?q={urllib.parse.quote(query)}&key={GOOGLE_KEY}&cx={CX_ID}"
     async with aiohttp.ClientSession() as session:
         async with session.get(search_url) as response:
@@ -197,6 +122,7 @@ async def chat_with_model(query, guild_id):
         conversation_histories[guild_id] = [{'role': 'user', 'content': START_MSG}]
     conversation_histories[guild_id].append({'role': 'user', 'content': query})
     try:
+        think_link = ""
         response = client.chat.completions.create(
             model=the_model,
             messages=conversation_histories[guild_id],
@@ -224,29 +150,26 @@ async def chat_with_model(query, guild_id):
             
             # Send the search results back to the AI model for further processing
             conversation_histories[guild_id].append({'role': 'system', 'content': f"Search Results:\n{search_response}"})
-            payload = {
-                'model': the_model,
-                'messages': conversation_histories[guild_id]
-            }
-            async with session.post(url, headers=headers, json=payload) as response:
-                response_data = await response.json()
-                model_response = response_data['choices'][0]['message']['content']
-                model_response = model_response.replace("@everyone", "*@*everyone").replace("@here", "*@*here")
-                # This is fucking terrible coding practice. PLEASE, PLEASE, for the love of god and anything that is holy, replace this in a future update.
-                if "<think>" in model_response and "</think>" in model_response:
-                    start_idx = model_response.find("<think>") + len("<think>")
-                    end_idx = model_response.find("</think>")
-                    think_content = model_response[start_idx:end_idx].strip()
-                    
-                    encoded_text = urllib.parse.quote(think_content)
-                    think_link = f"https://web-iris.vercel.app/view_thinking.html?text={encoded_text}"
-                    
-                    # Remove <think>...</think> from the message
-                    model_response = model_response[:start_idx - len("<think>")] + model_response[end_idx + len("</think>"):]
-                    model_response = model_response.strip()
-                    
-                    # Append the View Thinking link at the top
-                    model_response = f"-# *[View Thinking]({think_link})*\n{model_response}"
+            response = client.chat.completions.create(
+                model=the_model,
+                messages=conversation_histories[guild_id],
+                max_tokens=1200,
+                temperature=0.7
+        	)
+            model_response = response.choices[0].message.content
+            model_response = model_response.replace("@everyone", "*@*everyone").replace("@here", "*@*here")
+            # This is fucking terrible coding practice. PLEASE, PLEASE, for the love of god and anything that is holy, replace this in a future update.
+            if "<think>" in model_response and "</think>" in model_response:
+                start_idx = model_response.find("<think>") + len("<think>")
+                end_idx = model_response.find("</think>")
+                think_content = model_response[start_idx:end_idx].strip()
+
+                encoded_text = urllib.parse.quote(think_content)
+                think_link = f"https://web-iris.vercel.app/v.html?text={encoded_text}"
+
+                # Remove <think>...</think> from the message
+                model_response = model_response[:start_idx - len("<think>")] + model_response[end_idx + len("</think>"):]
+                model_response = model_response.strip()
             
         if "<think>" in model_response and "</think>" in model_response:
             start_idx = model_response.find("<think>") + len("<think>")
@@ -254,19 +177,17 @@ async def chat_with_model(query, guild_id):
             think_content = model_response[start_idx:end_idx].strip()
             
             encoded_text = urllib.parse.quote(think_content)
-            think_link = f"https://web-iris.vercel.app/view_thinking.html?text={encoded_text}"
+            think_link = f"https://web-iris.vercel.app/v.html?text={encoded_text}"
             
             # Remove <think>...</think> from the message
             model_response = model_response[:start_idx - len("<think>")] + model_response[end_idx + len("</think>"):]
             model_response = model_response.strip()
-            
-            # Append the View Thinking link at the top
-            model_response = f"-# *[View Thinking]({think_link})*\n{model_response}"
+          
         
         conversation_histories[guild_id].append({'role': 'assistant', 'content': model_response})
-        return model_response
+        return model_response, think_link
     except Exception as e:
-        logger.error(f"Error: {str(e)} (Using model: {the_model})")
+        logging.error(f"Error: {str(e)} (Using model: {the_model})")
         return None
     
 async def update_presence():
@@ -280,12 +201,12 @@ async def update_presence():
 
 @bot.event
 async def on_ready():
-    logger.info(f'Logged in as {bot.user}')
+    logging.info(f'Logged in as {bot.user}')
     try:
         synced = await bot.tree.sync()
-        logger.info(f"Synced {len(synced)} commands")
+        logging.info(f"Synced {len(synced)} commands")
     except Exception as e:
-        logger.error(f"Error syncing commands: {e}")
+        logging.error(f"Error syncing commands: {e}")
 
     bot.loop.create_task(update_presence())
 
@@ -293,14 +214,11 @@ async def on_ready():
 async def on_message(message):
     if not message.author.bot:
         guild_id = str(message.guild.id)  # Convert guild_id to string
-        logger.info(f"Received message from guild {guild_id}")
         
         # Reload conversation histories if guild_id is not found
         if guild_id not in conversation_histories:
             conversation_histories[guild_id] = [{'role': 'user', 'content': START_MSG}]
             save_conversation_histories()
-        else:
-            logger.info(f"Guild {guild_id} found in conversation_histories")
         
         if (guild_id in default_channels and message.channel.id in default_channels[guild_id]) or f"<@{bot.user.id}>" in message.content:
             if not message.content.startswith("//"):
@@ -311,30 +229,45 @@ async def on_message(message):
                     username = "Anonymous"
                 print(f'\033[90m({message.guild.name}) \033[92m{username}:\033[0m {themessage}')
                 async with message.channel.typing():
-                    response = await chat_with_model(f"({message.guild.name}) {username}: {themessage}", guild_id)
+                    response, think_link = await chat_with_model(f"({message.guild.name}) {username}: {themessage}", guild_id)
+                view = discord.ui.View()
+                if think_link != "":
+                    button = discord.ui.Button(
+                        style = discord.ButtonStyle.link,
+                        url = think_link,
+                        label = "View Thinking",
+                        emoji = "🧠"
+                    )
+                    view.add_item(button)
+                    
                 if not DEV_MODE:
                     if response:
                         if response == "None":
                             response = "***An error occurred. Please try again, or contact turtledevv.***"
                         else:
-                            await send_message_in_chunks(message, response)
+                            if think_link != "":
+                                await message.reply(view=view)
+                            await send_message_in_chunks(message.channel, response)
                     else:
                         await message.reply("***An error occurred. Please try again, or contact turtledevv.***")
                 else:
-                    await send_message_in_chunks(message, response)
+                    if think_link != "":
+                    	await message.reply(view=view)
+
+                    await send_message_in_chunks(message.channel, response) # type: ignore
         else:
             await bot.process_commands(message)
 
 
-async def send_message_in_chunks(message, text):
-    # Split the message into chunks of max 2000 characters
+async def send_message_in_chunks(channel, text):
     chunk_size = 2000
     chunks = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
     for chunk in chunks:
-        await message.reply(chunk)
+        await channel.send(chunk)
 
 models = load_models()
 MODEL_CHOICES = []
+model_data = []
 for model in models.data:
     MODEL_CHOICES.append(discord.app_commands.Choice(name=f"{model.id} - {model.owned_by.capitalize()}", value=model.id))
 
@@ -342,18 +275,35 @@ for model in models.data:
 @app_commands.describe(model = "The model to use.")
 @app_commands.choices(model=MODEL_CHOICES)
 async def change_model(interaction: discord.Interaction, model: str):
-    logger.debug(f"/change_model invoked by {interaction.user.name}")
+    logging.debug(f"/change_model invoked by {interaction.user.name}")
     global the_model
+    
+    the_model = model
+        
     guild_id = interaction.guild.id
     if guild_id not in conversation_histories:
         conversation_histories[guild_id] = [{'role': 'user', 'content': START_MSG}]
-    conversation_histories[guild_id].append({'role': 'user', 'content': f"({interaction.user.name} changed the model to {model})"})
-    await interaction.response.send_message(f"## Selected model: {model}\n-# Changed by {interaction.user.name}")
-    the_model = model
+    conversation_histories[guild_id].append({'role': 'system', 'content': f"({interaction.user.name} changed the model to {model})"})
+    model_img = ""
+    if the_model == "gpt-4o" or the_model == "gpt-4o-mini" or the_model == "o3-mini":
+        model_img = "https://img.logo.dev/chatgpt.com"
+        model_color = discord.Color.from_rgb(152, 255, 152)
+    if the_model == "deepseek-r1":
+        model_img = "https://img.logo.dev/deepseek.com"
+        model_color = discord.Color.blue()
+    if the_model == "grok-2":
+        model_img = "https://www.google.com/s2/favicons?sz=256&domain_url=https%3A%2F%2Fgrok.com%2F"
+        model_color = discord.Color.from_rgb(0,0,0)
+    embed = discord.Embed(title=the_model)
+    embed.set_author(name="Model changed")
+    embed.set_thumbnail(url=model_img)
+    embed.set_footer(text=interaction.user.name, icon_url=interaction.user.avatar.url)
+    
+    await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="hideusername", description="Be an anonymous user.")
 async def hide_username(interaction: discord.Interaction):
-    logger.debug(f"/hideusername invoked by {interaction.user.name}")
+    logging.debug(f"/hideusername invoked by {interaction.user.name}")
     user_id = interaction.user.id
     anonymous_users[user_id] = not anonymous_users.get(user_id, False)
     status = "anonymous" if anonymous_users[user_id] else "visible"
@@ -361,7 +311,7 @@ async def hide_username(interaction: discord.Interaction):
 
 @bot.tree.command(name="clear_memory", description="Clear the bot's conversation history.")
 async def clear_memory(interaction: discord.Interaction):
-    logger.debug(f"/clear_memory invoked by {interaction.user.name}")
+    logging.debug(f"/clear_memory invoked by {interaction.user.name}")
     if has_admin_permissions(interaction):
         guild_id = interaction.guild.id
         conversation_histories[guild_id] = [{'role': 'user', 'content': START_MSG}]
@@ -371,13 +321,13 @@ async def clear_memory(interaction: discord.Interaction):
 
 @bot.tree.command(name="bot_invite", description="Get the invite link for the bot.")
 async def bot_invite(interaction: discord.Interaction):
-    logger.debug(f"/bot_invite invoked by {interaction.user.name}")
+    logging.debug(f"/bot_invite invoked by {interaction.user.name}")
     await interaction.response.send_message("https://discord.com/oauth2/authorize?client_id=1340580911892271185&scope=bot&permissions=8")
 
 @bot.tree.command(name="change_prompt", description="Change the initial prompt for the current server.")
 @app_commands.describe(prompt="The new initial prompt.")
 async def change_prompt(interaction: discord.Interaction, prompt: str):
-    logger.debug(f"/change_prompt invoked by {interaction.user.name}")
+    logging.debug(f"/change_prompt invoked by {interaction.user.name}")
     global START_MSG
     if has_admin_permissions(interaction):
         guild_id = str(interaction.guild.id)
@@ -418,7 +368,7 @@ async def change_prompt(interaction: discord.Interaction, prompt: str):
 
 @bot.tree.command(name="add_default_channel", description="Add a default channel for the bot to respond in.")
 async def add_default_channel(interaction: discord.Interaction):
-    logger.debug(f"/add_default_channel invoked by {interaction.user.name}")
+    logging.debug(f"/add_default_channel invoked by {interaction.user.name}")
     if has_admin_permissions(interaction):
         guild_id = interaction.guild.id
         channel_id = interaction.channel.id
@@ -435,7 +385,7 @@ async def add_default_channel(interaction: discord.Interaction):
 
 @bot.tree.command(name="remove_default_channel", description="Remove a default channel for the bot to respond in.")
 async def remove_default_channel(interaction: discord.Interaction):
-    logger.debug(f"/remove_default_channel invoked by {interaction.user.name}")
+    logging.debug(f"/remove_default_channel invoked by {interaction.user.name}")
     if has_admin_permissions(interaction):
         guild_id = interaction.guild.id
         channel_id = interaction.channel.id
